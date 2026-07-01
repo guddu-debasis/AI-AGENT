@@ -1,118 +1,648 @@
-# Today's Lesson: Embeddings, Chunking, Batch Size, and Reranking
+````md
+# 📘 RAG Learning Notes — Lesson 1
+# Embeddings, Chunking, Batch Size & Reranking
 
-## 1. Embeddings
+> **Objective:** Learn how embeddings are generated, how documents are split into chunks, why normalization matters, what batch size does, and how reranking improves Retrieval-Augmented Generation (RAG).
 
-Embeddings are numerical vector representations of text that capture
-semantic meaning.
+---
+
+# Table of Contents
+
+1. What are Embeddings?
+2. Understanding `HuggingFaceEmbeddings`
+3. Embedding Normalization
+4. Batch Size
+5. Document Chunking
+6. Why Did We Get 50 Chunks?
+7. Reranking Models
+8. Embeddings vs Rerankers
+9. Using Embeddings and Rerankers Together
+10. Complete RAG Pipeline
+11. Best Practices
+12. Interview Questions
+13. Summary
+
+---
+
+# 1. What are Embeddings?
+
+An **embedding** is a numerical representation (vector) of text that captures its semantic meaning.
+
+Instead of storing words directly, an embedding model converts text into numbers.
 
 Example:
 
-``` python
+Text:
+
+```
+"I love Machine Learning."
+```
+
+Embedding:
+
+```text
+[0.214, -0.731, 0.502, ..., 0.118]
+```
+
+Two sentences with similar meanings will have similar vectors.
+
+Example:
+
+```
+"I love AI."
+
+"I enjoy Artificial Intelligence."
+```
+
+These embeddings will be close together in vector space.
+
+---
+
+# 2. Understanding `HuggingFaceEmbeddings`
+
+Example:
+
+```python
+from langchain_huggingface import HuggingFaceEmbeddings
+
 embeddings = HuggingFaceEmbeddings(
     model_name="BAAI/bge-m3",
-    encode_kwargs={"normalize_embeddings": True}
+    encode_kwargs={
+        "batch_size":64,
+        "normalize_embeddings":True
+    }
 )
 ```
 
--   `HuggingFaceEmbeddings`: Loads an embedding model.
--   `model_name="BAAI/bge-m3"`: Uses the BAAI BGE-M3 embedding model.
--   `encode_kwargs`: Extra options passed to the encoder.
--   `normalize_embeddings=True`: Produces unit-length vectors for cosine
-    similarity.
+## Explanation
 
-## 2. Why Normalize Embeddings?
+### `HuggingFaceEmbeddings`
 
-Cosine similarity compares vector directions, not magnitudes.
+Loads an embedding model from Hugging Face.
 
-Benefits: - Better retrieval quality with cosine similarity. - Dot
-product equals cosine similarity for normalized vectors. - Consistent
-vector magnitudes.
+Its job is to convert text into vectors.
 
-## 3. Batch Size
+---
+
+### `model_name="BAAI/bge-m3"`
+
+Specifies which embedding model should be loaded.
+
+- **BAAI** → Organization
+- **bge-m3** → Embedding model
+
+---
+
+### `encode_kwargs`
+
+Extra parameters passed to the model while generating embeddings.
 
 Example:
 
-``` python
+```python
 encode_kwargs={
-    "batch_size": 64,
-    "normalize_embeddings": True
+    "batch_size":64,
+    "normalize_embeddings":True
 }
 ```
 
-`batch_size=64` means the model encodes **64 texts at once**.
+---
 
-Advantages: - Faster processing. - Better GPU utilization.
+# 3. Embedding Normalization
 
-Trade-off: - Larger batch size requires more memory. - It **does not
-change embedding quality**.
+```python
+normalize_embeddings=True
+```
 
-## 4. Text Chunking
+This converts every embedding into a **unit vector**.
+
+Without normalization:
+
+```
+Vector
+
+[3,4]
+
+Length = 5
+```
+
+After normalization:
+
+```
+[0.6,0.8]
+
+Length = 1
+```
+
+Every vector has magnitude = 1.
+
+---
+
+## Why normalize?
+
+Most vector databases use **Cosine Similarity**.
+
+Cosine Similarity measures only the **direction** of vectors.
+
+Normalization improves:
+
+- Retrieval quality
+- Faster similarity computation
+- Consistent vector lengths
+
+---
+
+# 4. Batch Size
 
 Example:
 
-``` python
+```python
+batch_size=64
+```
+
+Batch size specifies **how many texts are encoded simultaneously.**
+
+Suppose we have **1000 document chunks**.
+
+### Batch Size = 1
+
+```
+Run 1 → Chunk 1
+
+Run 2 → Chunk 2
+
+Run 3 → Chunk 3
+
+...
+
+Run 1000
+```
+
+Total model runs:
+
+```
+1000
+```
+
+---
+
+### Batch Size = 64
+
+```
+Run 1
+
+Chunks 1–64
+
+Run 2
+
+Chunks 65–128
+
+...
+
+Run 16
+```
+
+Only about **16 runs** are required.
+
+---
+
+## Advantages
+
+- Faster encoding
+- Better GPU utilization
+- Higher throughput
+
+---
+
+## Disadvantages
+
+Larger batches require:
+
+- More RAM
+- More GPU memory (VRAM)
+
+---
+
+## Does Batch Size Affect Embedding Quality?
+
+**No.**
+
+Batch size only changes processing speed.
+
+The embedding values remain the same.
+
+---
+
+# 5. Document Chunking
+
+Example:
+
+```python
 RecursiveCharacterTextSplitter(
     chunk_size=1000,
     chunk_overlap=150
 )
 ```
 
--   `chunk_size=1000`: Maximum characters per chunk.
--   `chunk_overlap=150`: Consecutive chunks share 150 characters.
+---
 
-The number of chunks depends on: - Total document length. - Number of
-documents. - Natural separators (paragraphs, newlines, etc.).
+## `chunk_size`
 
-Example: - 42,500 characters with `chunk_size=1000` and
-`chunk_overlap=150` produces about 50 chunks.
+Maximum characters in each chunk.
 
-## 5. Reranking Models
+Example:
 
-A reranking model reorders the documents retrieved by the vector
-database.
+```
+1000 characters
+```
 
-Pipeline:
+---
 
-``` text
+## `chunk_overlap`
+
+Characters shared between consecutive chunks.
+
+Example:
+
+```
+Chunk 1
+
+|----------------1000----------------|
+
+Chunk 2
+
+              |----------------1000----------------|
+
+              <------150 overlap------>
+```
+
+This overlap preserves context across chunk boundaries.
+
+---
+
+# 6. Why Did We Get 50 Chunks?
+
+Suppose:
+
+```
+Document Length
+
+42,500 characters
+```
+
+Settings:
+
+```
+chunk_size = 1000
+
+chunk_overlap = 150
+```
+
+Effective movement:
+
+```
+1000 − 150
+
+=
+
+850 characters
+```
+
+Approximate formula:
+
+```
+Chunks
+
+≈ ceil(
+
+(Document Length − Overlap)
+
+/
+
+(chunk_size − overlap)
+
+)
+```
+
+Example:
+
+```
+≈ ceil(
+
+(42500−150)
+
+/850
+
+)
+
+≈ 50 chunks
+```
+
+---
+
+### Important
+
+The number of chunks depends on:
+
+- Document length
+- Number of documents
+- Paragraph breaks
+- Newlines
+- Chunk size
+- Chunk overlap
+
+It **cannot** be determined from `chunk_size` alone.
+
+---
+
+# 7. Reranking Models
+
+A reranking model improves retrieval quality by **reordering retrieved documents**.
+
+Imagine the vector database returns:
+
+| Rank | Document |
+|------|----------|
+| 1 | Account Creation |
+| 2 | Password Reset |
+| 3 | Login Issues |
+
+User asks:
+
+```
+How do I reset my password?
+```
+
+The best document is actually **Password Reset**.
+
+A reranker fixes this.
+
+After reranking:
+
+| Rank | Document |
+|------|----------|
+| 1 | Password Reset ✅ |
+| 2 | Login Issues |
+| 3 | Account Creation |
+
+---
+
+## How does a reranker work?
+
+Instead of comparing vectors,
+
+it compares:
+
+```
+Query
+
++
+
+Document
+
+↓
+
+Relevance Score
+```
+
+Example:
+
+```
+Query
+
+How do I reset my password?
+
+Document
+
+Click "Forgot Password"...
+
+↓
+
+Score
+
+0.98
+```
+
+---
+
+# 8. Embeddings vs Rerankers
+
+| Feature | Embedding Model | Reranking Model |
+|----------|-----------------|-----------------|
+| Input | One text | Query + Document |
+| Output | Vector | Relevance Score |
+| Speed | Very Fast | Slower |
+| Searches Millions of Docs | ✅ | ❌ |
+| Accuracy | Good | Excellent |
+| Used For | Initial Retrieval | Final Ranking |
+
+---
+
+# 9. Can We Use Both Together?
+
+**Yes!**
+
+Modern RAG systems always combine them.
+
+Workflow:
+
+```
 User Query
-    ↓
+
+↓
+
 Embedding Model
-    ↓
-Vector Database (Top 20)
-    ↓
-Reranking Model
-    ↓
+
+↓
+
+Vector Database
+
+↓
+
+Top 20 Documents
+
+↓
+
+Reranker
+
+↓
+
 Top 5 Documents
-    ↓
+
+↓
+
+LLM
+
+↓
+
+Final Answer
+```
+
+---
+
+# 10. Complete RAG Pipeline
+
+```
+Documents
+
+↓
+
+Chunking
+
+↓
+
+Embedding Model
+
+↓
+
+Vector Database
+
+────────────────────────────
+
+User Query
+
+↓
+
+Embedding
+
+↓
+
+Vector Search
+
+↓
+
+Top-K Documents
+
+↓
+
+Reranker
+
+↓
+
+Best Documents
+
+↓
+
+LLM
+
+↓
+
+Answer
+```
+
+---
+
+# 11. Best Practices
+
+### Embeddings
+
+✅ Normalize embeddings for cosine similarity.
+
+---
+
+### Chunking
+
+- Keep chunk size between **500–1000 characters** (or an equivalent token budget, depending on your model).
+- Use **10–20% overlap** to preserve context.
+
+---
+
+### Batch Size
+
+- CPU → 8–16
+- GPU → 32–128 (depending on available VRAM)
+
+---
+
+### Reranker
+
+Retrieve many documents first.
+
+Example:
+
+```
+Retrieve Top 20
+
+↓
+
+Rerank
+
+↓
+
+Keep Top 5
+```
+
+---
+
+# 12. Interview Questions
+
+### Beginner
+
+1. What is an embedding?
+
+2. Why are embeddings needed?
+
+3. What is cosine similarity?
+
+4. Why normalize embeddings?
+
+5. What does `batch_size` do?
+
+---
+
+### Intermediate
+
+6. Does batch size affect embedding quality?
+
+7. What is chunk overlap?
+
+8. Why do we split documents?
+
+9. How is chunk count calculated?
+
+10. What is a reranking model?
+
+---
+
+### Advanced
+
+11. Why can't rerankers search millions of documents?
+
+12. Why are rerankers more accurate?
+
+13. Explain a complete RAG retrieval pipeline.
+
+14. Difference between an embedding model and a cross-encoder reranker?
+
+15. Why do production RAG systems use both?
+
+---
+
+# 13. Summary
+
+✅ Embeddings convert text into vectors.
+
+✅ Normalize embeddings when using cosine similarity.
+
+✅ Batch size controls how many texts are encoded together.
+
+✅ Chunk overlap preserves context.
+
+✅ The number of chunks depends on document size and separators.
+
+✅ Rerankers improve retrieval accuracy by reordering retrieved documents.
+
+✅ Modern RAG systems combine:
+
+```
+Embedding Model
+        +
+Vector Database
+        +
+Reranker
+        +
 LLM
 ```
 
-### Embedding vs Reranker
-
-  Embedding Model                  Reranking Model
-  -------------------------------- ----------------------------------
-  Converts text into vectors       Scores query-document pairs
-  Very fast                        Slower
-  Searches millions of documents   Reranks only retrieved documents
-  Approximate retrieval            Highly accurate ordering
-
-## 6. Can They Be Used Together?
-
-Yes. This is the standard production RAG architecture.
-
-1.  Embed documents.
-2.  Store embeddings in a vector database.
-3.  Embed the user query.
-4.  Retrieve Top-K documents.
-5.  Rerank those documents.
-6.  Send the best documents to the LLM.
-
-## Key Takeaways
-
--   Embeddings represent semantic meaning as vectors.
--   Normalize embeddings when using cosine similarity.
--   Batch size controls how many texts are encoded simultaneously.
--   Chunk count depends on document size, not just chunk settings.
--   Reranking improves retrieval accuracy after vector search.
--   Embeddings + reranking provide the best balance of speed and quality
-    in RAG systems.
+to achieve both **high speed** and **high retrieval accuracy**.
+````
